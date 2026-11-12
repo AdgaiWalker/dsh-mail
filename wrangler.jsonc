@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "ds-mail",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "addresses": [
+    "bot@goodloop.si",
+    "verify@goodloop.si"
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "MAIL_KV",
+      "id": "8ace8b13930a4067a55afe9be098fd57"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "source": "omni-mail-goodloop",
+  "backed_up_at": "2026-11-12T05:05:00+08:00",
+  "cloudflare_account": "10033e3b38bdeb59c54b9ee036bb4fec",
+  "zone": "goodloop.si",
+  "d1_database": "3de0b976-3719-4586-acc6-f65ad309ede2",
+  "counts": {
+    "users": 1,
+    "mailboxes": 3,
+    "domains": 1,
+    "messages": 0
+  },
+  "users": [
+    { "id": "06488ec5-f066-4be6-85fa-704677fe80dd", "email": "admin@goodloop.si" }
+  ],
+  "domains": ["goodloop.si"],
+  "mailboxes": [
+    "god@goodloop.si",
+    "40a63eeab2fc@goodloop.si",
+    "56ec49f1baea@goodloop.si"
+  ],
+  "note": "No real messages were stored. Old worker never received mail because the domain had no MX before 2026-11-11."
+}

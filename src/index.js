@@ -1,0 +1,126 @@
+import PostalMime from 'postal-mime'
+
+const MAX_MESSAGES = 50
+const MAX_TEXT = 20000
+
+const json = (data, status = 200) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+  })
+
+const authorized = (request, env) => {
+  const auth = request.headers.get('Authorization') || ''
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+  return Boolean(env.API_TOKEN) && token === env.API_TOKEN
+}
+
+async function readList(env, key) {
+  try {
+    const value = await env.MAIL_KV.get(key, 'json')
+    return Array.isArray(value) ? value : []
+  } catch {
+    return []
+  }
+}
+
+async function handleEmail(message, env) {
+  try {
+    const raw = await new Response(message.raw).arrayBuffer()
+    const mail = await PostalMime.parse(raw)
+    const to = (mail.to?.[0]?.address || message.to || '').toLowerCase()
+    const item = {
+      id: crypto.randomUUID(),
+      to,
+      from: mail.from?.address || '',
+      fromName: mail.from?.name || '',
+      subject: mail.subject || '',
+      date: mail.date || new Date().toISOString(),
+      receivedAt: new Date().toISOString(),
+      text: (mail.text || '').slice(0, MAX_TEXT),
+      html: (mail.html || '').slice(0, MAX_TEXT),
+    }
+
+    const addressKey = `inbox:${to}`
+    const list = await readList(env, addressKey)
+    list.unshift(item)
+    await env.MAIL_KV.put(addressKey, JSON.stringify(list.slice(0, MAX_MESSAGES)))
+
+    const all = await readList(env, 'inbox:all')
+    all.unshift(item)
+    await env.MAIL_KV.put('inbox:all', JSON.stringify(all.slice(0, MAX_MESSAGES)))
+
+    return
+  } catch (error) {
+    console.error('email parse failed', error)
+    try {
+      message.setReject('Message could not be parsed')
+    } catch {}
+  }
+}
+
+function extractCode(subject = '', text = '') {
+  const haystack = `${subject}\n${text}`
+  const patterns = [
+    /(?:验证码|校验码|确认码|verification code|security code|code)[^0-9A-Z]{0,20}([0-9]{4,8})/i,
+    /\b([0-9]{6})\b/,
+    /\b([0-9]{4,8})\b/,
+    /\b([A-Z0-9]{6})\b/,
+  ]
+  for (const pattern of patterns) {
+    const match = haystack.match(pattern)
+    if (match) return match[1]
+  }
+  return null
+}
+
+async function handleFetch(request, env) {
+  const url = new URL(request.url)
+  if (url.pathname === '/health') return json({ ok: true })
+
+  if (!authorized(request, env)) return json({ ok: false, error: 'unauthorized' }, 401)
+
+  const to = (url.searchParams.get('to') || 'bot@goodloop.si').toLowerCase()
+  const limit = Math.min(Number(url.searchParams.get('limit') || 10), MAX_MESSAGES)
+
+  if (url.pathname === '/api/latest' || url.pathname === '/api/messages') {
+    const all = url.searchParams.get('all') === '1'
+    const list = await readList(env, all ? 'inbox:all' : `inbox:${to}`)
+    return json({ ok: true, to: all ? 'all' : to, count: list.length, messages: list.slice(0, limit) })
+  }
+
+  if (url.pathname === '/api/code') {
+    const list = await readList(env, `inbox:${to}`)
+    for (const message of list.slice(0, limit)) {
+      const code = extractCode(message.subject, message.text)
+      if (code) {
+        return json({
+          ok: true,
+          to,
+          code,
+          subject: message.subject,
+          from: message.from,
+          date: message.date,
+          receivedAt: message.receivedAt,
+        })
+      }
+    }
+    return json({ ok: false, error: 'no code found', to, checked: Math.min(list.length, limit) }, 404)
+  }
+
+  if (url.pathname === '/api/clear' && request.method === 'POST') {
+    await env.MAIL_KV.delete(`inbox:${to}`)
+    return json({ ok: true, cleared: to })
+  }
+
+  return json({ ok: false, error: 'not found' }, 404)
+}
+
+export default {
+  async email(message, env, ctx) {
+    await handleEmail(message, env)
+  },
+  async fetch(request, env, ctx) {
+    return handleFetch(request, env)
+  },
+}
