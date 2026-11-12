@@ -31,6 +31,24 @@ DeepSeekBot 的极简收件箱 — 跑在 Cloudflare Email Routing + Workers KV 
 | 鉴权 | 完整用户体系 | 单一 `API_TOKEN` Bearer 认证 |
 | 用途 | 自托管邮件工作台 | Bot 的验证码 / 通知收件箱 |
 
+## 网页访问与登录
+
+部署后访问 `https://mail.goodloop.si/`，会先看到登录页。
+
+**登录密码**保存在 Cloudflare secret `MAIL_PASSWORD` 中（不要写进代码）：
+
+```bash
+# 设置或修改登录密码
+echo "你的新密码" | npx wrangler secret put MAIL_PASSWORD
+```
+
+登录成功后，服务端返回 `API_TOKEN`，浏览器存入 `localStorage`，下次打开免密进入。
+
+**安全措施**：
+- 密码比较使用恒定时间算法，防时序攻击
+- KV 限流：同一 IP 每分钟最多 8 次尝试
+- 登录态失效（token 丢失）会自动回到登录页
+
 ## 配置
 
 `wrangler.jsonc` 关键项：
@@ -54,6 +72,7 @@ npm run deploy     # 部署到 Cloudflare
 | 名称 | 类型 | 说明 |
 |------|------|------|
 | `API_TOKEN` | Secret | API 访问令牌，Bearer 认证用 |
+| `MAIL_PASSWORD` | Secret | 网页登录密码，登录成功后换取 API_TOKEN |
 | `MAIL_KV` | KV Binding | 邮件存储命名空间 |
 
 ## 目录结构

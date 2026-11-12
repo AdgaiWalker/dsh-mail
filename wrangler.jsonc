@@ -4,6 +4,12 @@
   "main": "src/index.js",
   "compatibility_date": "2026-11-11",
   "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "mail.goodloop.si",
+      "custom_domain": true
+    }
+  ],
   "addresses": [
     "bot@goodloop.si",
     "verify@goodloop.si"

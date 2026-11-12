@@ -1,3 +1,4 @@
+import { UI_HTML } from './ui.js'
 import PostalMime from 'postal-mime'
 
 const MAX_MESSAGES = 50
@@ -13,6 +14,53 @@ const authorized = (request, env) => {
   const auth = request.headers.get('Authorization') || ''
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
   return Boolean(env.API_TOKEN) && token === env.API_TOKEN
+}
+
+// 密码登录：校验 MAIL_PASSWORD，成功后返回 API_TOKEN
+// 限流用 KV 存储（Worker 多实例不共享内存，必须用 KV）
+const MAX_ATTEMPTS = 8
+const WINDOW_SECONDS = 60
+
+async function checkRateLimit(env, ip) {
+  const key = `rl:${ip}`
+  const raw = await env.MAIL_KV.get(key)
+  let count = 0
+  if (raw) {
+    try { count = Number(JSON.parse(raw).c || 0) } catch { count = 0 }
+  }
+  count += 1
+  if (count > MAX_ATTEMPTS) return false
+  // KV 最小过期时间 60 秒
+  await env.MAIL_KV.put(key, JSON.stringify({ c: count }), { expirationTtl: WINDOW_SECONDS })
+  return true
+}
+
+async function handleLogin(request, env) {
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
+  if (!(await checkRateLimit(env, ip))) {
+    return json({ ok: false, error: 'too many attempts, try again later' }, 429)
+  }
+  if (!env.MAIL_PASSWORD || !env.API_TOKEN) {
+    return json({ ok: false, error: 'login not configured' }, 500)
+  }
+  let body
+  try {
+    body = await request.json()
+  } catch {
+    return json({ ok: false, error: 'invalid body' }, 400)
+  }
+  const password = String(body?.password || '')
+  // 恒定时间比较，避免时序攻击
+  const expected = String(env.MAIL_PASSWORD)
+  let diff = password.length ^ expected.length
+  for (let i = 0; i < Math.max(password.length, expected.length); i++) {
+    diff |= (password.charCodeAt(i) || 0) ^ (expected.charCodeAt(i) || 0)
+  }
+  if (diff !== 0) {
+    return json({ ok: false, error: 'wrong password' }, 401)
+  }
+  await env.MAIL_KV.delete(`rl:${ip}`)
+  return json({ ok: true, token: env.API_TOKEN })
 }
 
 async function readList(env, key) {
@@ -77,6 +125,18 @@ function extractCode(subject = '', text = '') {
 async function handleFetch(request, env) {
   const url = new URL(request.url)
   if (url.pathname === '/health') return json({ ok: true })
+
+  // 密码登录取 token
+  if (url.pathname === '/api/login' && request.method === 'POST') {
+    return handleLogin(request, env)
+  }
+
+  // 收件箱网页（不需要 API token，页面本身用 hash token 调 API）
+  if (url.pathname === '/' || url.pathname === '/index.html') {
+    return new Response(UI_HTML, {
+      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' },
+    })
+  }
 
   if (!authorized(request, env)) return json({ ok: false, error: 'unauthorized' }, 401)
 
